@@ -27,12 +27,16 @@ module SolidQueue
 
     private
       def poll
+        post_executions
+
+        pool.idle? ? polling_interval : 10.minutes
+      end
+
+      def post_executions
         claim_executions.then do |executions|
           executions.each do |execution|
             pool.post(execution)
           end
-
-          pool.idle? ? polling_interval : 10.minutes
         end
       end
 
