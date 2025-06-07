@@ -1,16 +1,19 @@
 require "test_helper"
 require "active_support/testing/method_call_assertions"
+require "active_support/testing/replication_coordinator"
 
 class WorkerTest < ActiveSupport::TestCase
   include ActiveSupport::Testing::MethodCallAssertions
 
   setup do
     @worker = SolidQueue::Worker.new(queues: "background", threads: 3, polling_interval: 0.2)
+    @was_rc = Rails.application.config.replication_coordinator
   end
 
   teardown do
     @worker.stop
     JobBuffer.clear
+    Rails.application.config.replication_coordinator = @was_rc
   end
 
   test "worker is registered as process" do
@@ -188,6 +191,20 @@ class WorkerTest < ActiveSupport::TestCase
     @worker.expects(:interruptible_sleep).with(@worker.polling_interval).at_least_once
     @worker.expects(:interruptible_sleep).with(10.minutes).never
     @worker.expects(:handle_thread_error).never
+
+    @worker.start
+    sleep 1.second
+  end
+
+  test "does not post executions if zone is not active" do
+    Rails.application.config.replication_coordinator = ActiveSupport::Testing::ReplicationCoordinator.new(false, polling_interval: 1.minute)
+
+    2.times { |i| StoreResultJob.perform_later(i, pause: 1.second) }
+
+    @worker.expects(:post_executions).never
+    @worker.expects(:interruptible_sleep).with(1.minute).at_least_once
+    @worker.expects(:interruptible_sleep).with(10.minutes).never
+    @worker.expects(:interruptible_sleep).with(@worker.polling_interval).never
 
     @worker.start
     sleep 1.second
