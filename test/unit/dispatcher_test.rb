@@ -1,5 +1,6 @@
 require "test_helper"
 require "active_support/testing/method_call_assertions"
+require "active_support/testing/replication_coordinator"
 
 class DispatcherTest < ActiveSupport::TestCase
   include ActiveSupport::Testing::MethodCallAssertions
@@ -8,10 +9,12 @@ class DispatcherTest < ActiveSupport::TestCase
 
   setup do
     @dispatcher = SolidQueue::Dispatcher.new(polling_interval: 0.1, batch_size: 10)
+    @was_rc = Rails.application.config.replication_coordinator
   end
 
   teardown do
     @dispatcher.stop
+    Rails.application.config.replication_coordinator = @was_rc
   end
 
   test "dispatcher is registered as process" do
@@ -119,7 +122,47 @@ class DispatcherTest < ActiveSupport::TestCase
     wait_while_with_timeout(1.second) { !SolidQueue::ScheduledExecution.exists? }
   end
 
-  private
+  test "does not dispatch batches if the zone is not active" do
+    Rails.application.config.replication_coordinator = ActiveSupport::Testing::ReplicationCoordinator.new(false, polling_interval: 1.minute)
+
+    @dispatcher.expects(:dispatch_next_batch).never
+    @dispatcher.expects(:interruptible_sleep).with(1.minute).at_least_once
+    @dispatcher.expects(:interruptible_sleep).with(0.seconds).never
+    @dispatcher.expects(:interruptible_sleep).with(@dispatcher.polling_interval).never
+
+    @dispatcher.start
+    sleep 1.second
+  end
+
+  test "stops concurrency maintenance on change to inactive zone" do
+    Rails.application.config.replication_coordinator = ActiveSupport::Testing::ReplicationCoordinator.new(true, polling_interval: 0.1.seconds)
+
+    dispatcher = SolidQueue::Dispatcher.new(polling_interval: 10, batch_size: 1)
+    dispatcher.start
+
+    dispatcher.expects(:stop_concurrency_maintenance).twice # once on change, once on shutdown
+
+    Rails.application.config.replication_coordinator.set_next_active_zone(false)
+    sleep 0.2.seconds
+  ensure
+    dispatcher&.stop
+  end
+
+  test "starts concurrency maintenance on change to active zone" do
+    Rails.application.config.replication_coordinator = ActiveSupport::Testing::ReplicationCoordinator.new(false, polling_interval: 0.1.seconds)
+
+    dispatcher = SolidQueue::Dispatcher.new(polling_interval: 10, batch_size: 1)
+    dispatcher.start
+
+    dispatcher.expects(:start_concurrency_maintenance).once
+
+    Rails.application.config.replication_coordinator.set_next_active_zone(true)
+    sleep 0.2.seconds
+  ensure
+    dispatcher&.stop
+  end
+
+ private
     def with_polling(silence:)
       old_silence_polling, SolidQueue.silence_polling = SolidQueue.silence_polling, silence
       yield

@@ -4,11 +4,15 @@ module SolidQueue
   class Scheduler < Processes::Base
     include Processes::Runnable
     include LifecycleHooks
+    include Processes::Standby
 
     attr_reader :recurring_schedule
 
     after_boot :run_start_hooks
-    after_boot :schedule_recurring_tasks
+    after_boot do
+      on_active_zone { schedule_recurring_tasks }
+      on_passive_zone { unschedule_recurring_tasks }
+    end
     before_shutdown :unschedule_recurring_tasks
     before_shutdown :run_stop_hooks
     after_shutdown :run_exit_hooks

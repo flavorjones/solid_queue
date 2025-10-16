@@ -3,8 +3,10 @@
 module SolidQueue
   class Worker < Processes::Poller
     include LifecycleHooks
+    include Processes::Standby
 
     after_boot :run_start_hooks
+    after_boot { on_active_zone { wake_up } }
     before_shutdown :run_stop_hooks
     after_shutdown :run_exit_hooks
 
@@ -27,12 +29,20 @@ module SolidQueue
 
     private
       def poll
+        if active_zone?
+          post_executions
+
+          pool.idle? ? polling_interval : 10.minutes
+        else
+          replication_coordinator.polling_interval
+        end
+      end
+
+      def post_executions
         claim_executions.then do |executions|
           executions.each do |execution|
             pool.post(execution)
           end
-
-          pool.idle? ? polling_interval : 10.minutes
         end
       end
 

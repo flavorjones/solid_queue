@@ -3,10 +3,16 @@
 module SolidQueue
   class Dispatcher < Processes::Poller
     include LifecycleHooks
+    include Processes::Standby
+
     attr_reader :batch_size
 
     after_boot :run_start_hooks
-    after_boot :start_concurrency_maintenance
+    after_boot do
+      on_active_zone { start_concurrency_maintenance }
+      on_active_zone { wake_up }
+      on_passive_zone { stop_concurrency_maintenance }
+    end
     before_shutdown :stop_concurrency_maintenance
     before_shutdown :run_stop_hooks
     after_shutdown :run_exit_hooks
@@ -29,9 +35,13 @@ module SolidQueue
       attr_reader :concurrency_maintenance
 
       def poll
-        batch = dispatch_next_batch
+        if active_zone?
+          batch = dispatch_next_batch
 
-        batch.zero? ? polling_interval : 0.seconds
+          batch.zero? ? polling_interval : 0.seconds
+        else
+          replication_coordinator.polling_interval
+        end
       end
 
       def dispatch_next_batch
