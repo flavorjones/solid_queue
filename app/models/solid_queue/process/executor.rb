@@ -9,7 +9,7 @@ module SolidQueue
         if ClaimedExecution.process_name_column_exists?
           has_many :claimed_executions, primary_key: :name, foreign_key: :process_name
         else
-          warn_about_pending_migrations
+          warn_about_pending_migrations if ClaimedExecution.table_exists?
 
           has_many :claimed_executions
         end

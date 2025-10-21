@@ -2,13 +2,13 @@
 
 class SolidQueue::ClaimedExecution < SolidQueue::Execution
   def self.process_name_column_exists?
-    column_names.include?("process_name")
+    table_exists? && column_names.include?("process_name")
   end
 
   if process_name_column_exists?
     belongs_to :process, primary_key: :name, foreign_key: :process_name
   else
-    warn_about_pending_migrations
+    warn_about_pending_migrations if table_exists?
 
     belongs_to :process
     attr_accessor :process_name
