@@ -3,6 +3,8 @@
 class SolidQueue::ClaimedExecution < SolidQueue::Execution
   def self.process_name_column_exists?
     table_exists? && column_names.include?("process_name")
+  rescue ActiveRecord::Tenanted::TenantDoesNotExistError
+    true
   end
 
   if process_name_column_exists?
